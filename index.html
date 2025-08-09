@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+
+<html lang="it">
+
+<head>
+
+<meta charset="utf-8" />
+
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+
+<title>alter.shell_non-hypercubic-universe</title>
+
+<link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin />
+
+<style>
+
+  :root {
+
+    --bg:#000;
+
+    --fg:#e24b4b;
+
+    --ink:#ededed;
+
+    --scan:rgba(255,255,255,0.045);
+
+    --glow:0 0 18px rgba(226,75,75,0.35);
+
+  }
+
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
+
+    font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, "JetBrains Mono", "IBM Plex Mono", monospace;}
+
+  #canvas-holder{position:fixed;inset:0;overflow:hidden;}
+
+  .scan{position:fixed;inset:0;pointer-events:none;
+
+    background:repeating-linear-gradient(to bottom, transparent 0px, transparent 3px, var(--scan) 4px, transparent 6px);
+
+    mix-blend-mode:soft-light;}
+
+  .badge{position:fixed;right:24px;top:24px;padding:8px 10px;border-radius:10px;
+
+    background:rgba(8,8,12,.75);border:1px solid rgba(226,75,75,.35);
+
+    font-weight:700;letter-spacing:.08em;color:#fee;box-shadow:var(--glow);}
+
+  .sig{position:fixed;left:24px;top:24px;padding:8px 10px;border-radius:10px;
+
+    background:rgba(8,8,12,.75);border:1px solid rgba(226,75,75,.35);color:#fbd;}
+
+  /* HUD / player */
+
+  .hud{position:fixed;left:24px;right:24px;bottom:24px;
+
+    background:linear-gradient(180deg, rgba(10,10,14,.88), rgba(6,6,10,.88));
+
+    border:1px solid rgba(226,75,75,.28);box-shadow:var(--glow), inset 0 0 0 1px rgba(255,255,255,.04);
+
+    backdrop-filter: blur(6px);border-radius:12px;padding:14px 16px;display:flex;gap:14px;align-items:center;}
+
+  .btn{appearance:none;border:1px solid rgba(226,75,75,.4);background:#120b0b;color:#ffdede;
+
+    padding:10px 14px;border-radius:8px;cursor:pointer;font-weight:700;letter-spacing:.06em;text-transform:uppercase;font-size:12px;box-shadow:var(--glow);}
+
+  .btn:active{transform:translateY(1px);}
+
+  .btn.mute{border-color:rgba(226,75,75,.25);color:#fbb;}
+
+  .grow{flex:1;display:flex;flex-direction:column;gap:8px;}
+
+  .toprow{display:flex;align-items:center;gap:12px;}
+
+  .label,.time{font-size:12px;opacity:.95;letter-spacing:.04em;}
+
+  .bar{position:relative;height:8px;background:#111;border-radius:999px;border:1px solid rgba(226,75,75,.25);cursor:pointer;overflow:hidden;}
+
+  .bar .progress{position:absolute;left:0;top:0;bottom:0;width:0%;background:linear-gradient(90deg,#7a1111,#e24b4b);}
+
+  .bar .knob{position:absolute;top:50%;width:12px;height:12px;border-radius:50%;background:#fff;
+
+    transform:translate(-50%,-50%);box-shadow:0 0 12px rgba(226,75,75,.8);mix-blend-mode:screen;}
+
+  .right{display:flex;align-items:center;gap:10px;}
+
+  input[type="range"]{width:140px;cursor:pointer;}
+
+</style>
+
+</head>
+
+<body>
+
+  <div id="canvas-holder"></div>
+
+  <div class="scan"></div>
+
+  <div class="sig">S U R V ∆ — CONTROL LOOP</div>
+
+  <div class="badge">NON-HYPERCUBIC // UNIVERSE [EP]</div>
+
+  <!-- HUD / PLAYER -->
+
+  <div class="hud" id="hud">
+
+    <button class="btn" id="play">PLAY</button>
+
+    <div class="grow">
+
+      <div class="toprow">
+
+        <span class="label" id="title">alter.shell — non-hypercubic universe ep</span>
+
+        <span class="time" id="time">00:00 / 00:00</span>
+
+      </div>
+
+      <div class="bar" id="seek">
+
+        <div class="progress" id="progress"></div>
+
+        <div class="knob" id="knob" style="left:0%"></div>
+
+      </div>
+
+    </div>
+
+    <div class="right">
+
+      <button class="btn mute" id="mute">MUTE</button>
+
+      <input id="vol" type="range" min="0" max="1" step="0.01" value="0.85" />
+
+    </div>
+
+  </div>
+
+  <audio id="audio" crossorigin="anonymous"></audio>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+
+<script>
+
+/* ==== AUDIO CORE ==== */
+
+const audioEl = document.getElementById('audio');
+
+const playBtn = document.getElementById('play');
+
+const muteBtn = document.getElementById('mute');
+
+const vol = document.getElementById('vol');
+
+const titleEl = document.getElementById('title');
+
+const timeEl = document.getElementById('time');
+
+const seek = document.getElementById('seek');
+
+const progress = document.getElementById('progress');
+
+const knob = document.getElementById('knob');
+
+let ctx, srcNode, analyser, freqData, started=false;
+
+let draggingSeek = false;
+
+function setupAudioGraph(){
+
+  if(ctx) return;
+
+  ctx = new (window.AudioContext||window.webkitAudioContext)();
+
+  srcNode = ctx.createMediaElementSource(audioEl);
+
+  analyser = ctx.createAnalyser();
+
+  analyser.fftSize = 2048;
+
+  analyser.smoothingTimeConstant = 0.9;
+
+  freqData = new Uint8Array(analyser.frequencyBinCount);
+
+  srcNode.connect(analyser);
+
+  analyser.connect(ctx.destination);
+
+}
+
+function loadFromURL(url){
+
+  audioEl.src = url;
+
+  titleEl.textContent = decodeURIComponent(url.split('/').pop()||url);
+
+  started = false;
+
+}
+
+function formatTime(s){
+
+  s=isFinite(s)?Math.floor(s):0;
+
+  const m=Math.floor(s/60), h=Math.floor(m/60), mm=m%60, ss=s%60;
+
+  return h>0?`${String(h).padStart(2,'0')}:${String(mm).padStart(2,'0')}:${String(ss).padStart(2,'0')}`:
+
+              `${String(mm).padStart(2,'0')}:${String(ss).padStart(2,'0')}`;
+
+}
+
+function updateTimeUI(){
+
+  const cur=audioEl.currentTime||0, dur=audioEl.duration||0;
+
+  timeEl.textContent=`${formatTime(cur)} / ${formatTime(dur)}`;
+
+  const p=dur?(cur/dur)*100:0;
+
+  progress.style.width=p+'%';
+
+  knob.style.left=p+'%';
+
+}
+
+/* Controls */
+
+playBtn.addEventListener('click', async()=>{
+
+  setupAudioGraph();
+
+  if(ctx.state==='suspended') await ctx.resume();
+
+  if(!started){started=true;}
+
+  if(audioEl.paused){await audioEl.play(); playBtn.textContent='PAUSE';}
+
+  else{audioEl.pause(); playBtn.textContent='PLAY';}
+
+});
+
+muteBtn.addEventListener('click',()=>{audioEl.muted=!audioEl.muted; muteBtn.textContent=audioEl.muted?'UNMUTE':'MUTE';});
+
+vol.addEventListener('input',()=>{audioEl.volume=Number(vol.value);});
+
+audioEl.addEventListener('timeupdate',updateTimeUI);
+
+audioEl.addEventListener('loadedmetadata',updateTimeUI);
+
+audioEl.addEventListener('ended',()=>{playBtn.textContent='PLAY';});
+
+seek.addEventListener('pointerdown',e=>{draggingSeek=true;seek.setPointerCapture(e.pointerId);seekTo(e.clientX);});
+
+seek.addEventListener('pointermove',e=>{if(draggingSeek) seekTo(e.clientX);});
+
+seek.addEventListener('pointerup',e=>{draggingSeek=false;seek.releasePointerCapture(e.pointerId);});
+
+function seekTo(xc){
+
+  const rect=seek.getBoundingClientRect();
+
+  const x=Math.min(Math.max(xc-rect.left,0),rect.width);
+
+  if(isFinite(audioEl.duration)){audioEl.currentTime=audioEl.duration*(x/rect.width);}
+
+}
+
+window.addEventListener('keydown',async e=>{
+
+  if(['Space','ArrowLeft','ArrowRight','ArrowUp','ArrowDown','KeyM'].includes(e.code)) e.preventDefault();
+
+  if(e.code==='Space'){playBtn.click();}
+
+  if(e.code==='ArrowLeft'){audioEl.currentTime=Math.max(0,audioEl.currentTime-5);}
+
+  if(e.code==='ArrowRight'){audioEl.currentTime=Math.min(audioEl.duration||Infinity,audioEl.currentTime+5);}
+
+  if(e.code==='ArrowUp'){audioEl.volume=Math.min(1,(audioEl.volume||0)+0.05); vol.value=audioEl.volume;}
+
+  if(e.code==='ArrowDown'){audioEl.volume=Math.max(0,(audioEl.volume||0)-0.05); vol.value=audioEl.volume;}
+
+  if(e.code==='KeyM'){muteBtn.click();}
+
+});
+
+/* Default or ?src=... */
+
+const params=new URLSearchParams(location.search);
+
+if(params.has('src')){loadFromURL(params.get('src'));}
+
+else{loadFromURL('non-hypercubic-universe-ep.mp3');}
+
+/* ==== VISUAL ==== */
+
+let t=0, spacing=90, cols, rows, modGrid=[], pts3=[], edges=[], angle=0;
+
+let freqDataBuf;
+
+function setup(){
+
+  const c=createCanvas(window.innerWidth,window.innerHeight);
+
+  c.parent('canvas-holder');
+
+  pixelDensity(1); noCursor(); background(0);
+
+  cols=int(width/spacing); rows=int(height/spacing);
+
+  for(let i=-cols/2;i<cols/2;i++){for(let j=-rows/2;j<rows/2;j++){modGrid.push({x:i*spacing,y:j*spacing});}}
+
+  const s=120;
+
+  const base=[createVector(-1,-1,-1),createVector(1,-1,-1),createVector(1,1,-1),createVector(-1,1,-1),
+
+              createVector(-1,-1,1),createVector(1,-1,1),createVector(1,1,1),createVector(-1,1,1)];
+
+  pts3=base.map(v=>p5.Vector.mult(v,s));
+
+  edges=[[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],[0,4],[1,5],[2,6],[3,7]];
+
+}
+
+function draw(){
+
+  t+=0.002; background(0,12);
+
+  let bass=0, mid=0, high=0;
+
+  if(analyser && freqData){
+
+    analyser.getByteFrequencyData(freqData);
+
+    const n=freqData.length, bEnd=int(n*0.08), mEnd=int(n*0.35);
+
+    for(let i=0;i<bEnd;i++) bass+=freqData[i];
+
+    for(let i=bEnd;i<mEnd;i++) mid+=freqData[i];
+
+    for(let i=mEnd;i<n;i++) high+=freqData[i];
+
+    bass/=max(1,bEnd); mid/=max(1,mEnd-bEnd); high/=max(1,n-mEnd);
+
+  }
+
+  push(); translate(width/2,height/2);
+
+  for(let g of modGrid){
+
+    const d=dist(g.x,g.y,0,0);
+
+    const wob=sin(t*90+d*0.05)*(4+(mid?map(mid,0,255,0,6):0));
+
+    stroke(255,60+(bass?map(bass,0,255,0,120):40),60,90);
+
+    strokeWeight(1+(high?map(high,0,255,0,0.6):0)); noFill();
+
+    rect(g.x+wob,g.y+wob,spacing*0.7,spacing*0.7,6);
+
+  }
+
+  pop();
+
+  push(); translate(width/2,height*0.52);
+
+  angle+=0.003+(mid?map(mid,0,255,0,0.003):0);
+
+  const rotX=angle*0.7, rotY=angle*0.9, cam=420;
+
+  function proj(v){const rx=rotX3(v,rotX), ry=rotY3(rx,rotY);
+
+    const z=ry.z+cam; return createVector(ry.x*(cam/(z)), ry.y*(cam/(z)));}
+
+  const p2=pts3.map(proj);
+
+  strokeWeight(1.6); noFill();
+
+  stroke(120,220,255,110); push();translate(2,-2);
+
+  for(let e of edges){const a=p2[e[0]], b=p2[e[1]]; line(a.x,a.y,b.x,b.y);} pop();
+
+  stroke(255,60,60,200);
+
+  for(let e of edges){const a=p2[e[0]], b=p2[e[1]]; line(a.x,a.y,b.x,b.y);}
+
+  pop();
+
+  stroke(255,22);
+
+  for(let y=0;y<height;y+=6){const w=sin(t*30+y*0.01)*(2+(high?map(high,0,255,0,3):1)); line(0+w,y,width+w,y);}
+
+}
+
+function rotX3(v,a){const c=cos(a), s=sin(a); return createVector(v.x, v.y*c - v.z*s, v.y*s + v.z*c);}
+
+function rotY3(v,a){const c=cos(a), s=sin(a); return createVector(v.x*c + v.z*s, v.y, -v.x*s + v.z*c);}
+
+function keyPressed(){if(key==='f'||key==='F'){let fs=fullscreen(); fullscreen(!fs);}}
+
+function windowResized(){
+
+  resizeCanvas(windowWidth,windowHeight);
+
+  cols=int(width/spacing); rows=int(height/spacing); modGrid=[];
+
+  for(let i=-cols/2;i<cols/2;i++){for(let j=-rows/2;j<rows/2;j++){modGrid.push({x:i*spacing,y:j*spacing});}}
+
+}
+
+</script>
+
+</body>
+
+</html>
